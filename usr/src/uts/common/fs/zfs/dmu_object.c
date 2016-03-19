@@ -31,13 +31,16 @@
 #include <sys/zap.h>
 #include <sys/zfeature.h>
 
+int object_alloc_rescan_levels = 1;
+
 uint64_t
 dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
 	uint64_t object;
 	uint64_t L2_dnode_count = DNODES_PER_BLOCK <<
-	    (DMU_META_DNODE(os)->dn_indblkshift - SPA_BLKPTRSHIFT);
+	    (object_alloc_rescan_levels *
+	    (DMU_META_DNODE(os)->dn_indblkshift - SPA_BLKPTRSHIFT));
 	dnode_t *dn = NULL;
 	int restarted = B_FALSE;
 
