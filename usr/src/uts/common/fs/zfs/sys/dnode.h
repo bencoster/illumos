@@ -40,6 +40,8 @@
 extern "C" {
 #endif
 
+extern int zfs_default_ibs;
+
 /*
  * dnode_hold() flags.
  */

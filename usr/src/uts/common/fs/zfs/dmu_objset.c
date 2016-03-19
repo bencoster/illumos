@@ -773,7 +773,7 @@ dmu_objset_create_impl(spa_t *spa, dsl_dataset_t *ds, blkptr_t *bp,
 	mdn = DMU_META_DNODE(os);
 
 	dnode_allocate(mdn, DMU_OT_DNODE, 1 << DNODE_BLOCK_SHIFT,
-	    DN_MAX_INDBLKSHIFT, DMU_OT_NONE, 0, tx);
+	    zfs_default_ibs, DMU_OT_NONE, 0, tx);
 
 	/*
 	 * We don't want to have to increase the meta-dnode's nlevels
