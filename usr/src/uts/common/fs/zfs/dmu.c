@@ -134,9 +134,9 @@ dmu_buf_hold_noread_by_dnode(dnode_t *dn, uint64_t offset,
 	dmu_buf_impl_t *db;
 
 	blkid = dbuf_whichblock(dn, 0, offset);
-	rw_enter(&dn->dn_struct_rwlock, RW_READER);
+	/*rw_enter(&dn->dn_struct_rwlock, RW_READER);*/
 	db = dbuf_hold(dn, blkid, tag);
-	rw_exit(&dn->dn_struct_rwlock);
+	/*rw_exit(&dn->dn_struct_rwlock);*/
 
 	if (db == NULL) {
 		*dbp = NULL;
@@ -159,9 +159,9 @@ dmu_buf_hold_noread(objset_t *os, uint64_t object, uint64_t offset,
 	if (err)
 		return (err);
 	blkid = dbuf_whichblock(dn, 0, offset);
-	rw_enter(&dn->dn_struct_rwlock, RW_READER);
+	/*rw_enter(&dn->dn_struct_rwlock, RW_READER); */
 	db = dbuf_hold(dn, blkid, tag);
-	rw_exit(&dn->dn_struct_rwlock);
+	/*rw_exit(&dn->dn_struct_rwlock);*/
 	dnode_rele(dn, FTAG);
 
 	if (db == NULL) {

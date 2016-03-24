@@ -665,7 +665,7 @@ dbuf_read_impl(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 	dn = DB_DNODE(db);
 	ASSERT(!refcount_is_zero(&db->db_holds));
 	/* We need the struct_rwlock to prevent db_blkptr from changing. */
-	ASSERT(RW_LOCK_HELD(&dn->dn_struct_rwlock));
+	/*ASSERT(RW_LOCK_HELD(&dn->dn_struct_rwlock));*/
 	ASSERT(MUTEX_HELD(&db->db_mtx));
 	ASSERT(db->db_state == DB_UNCACHED);
 	ASSERT(db->db_buf == NULL);
@@ -767,8 +767,10 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 
 	DB_DNODE_ENTER(db);
 	dn = DB_DNODE(db);
+#if 0
 	if ((flags & DB_RF_HAVESTRUCT) == 0)
 		rw_enter(&dn->dn_struct_rwlock, RW_READER);
+#endif
 
 	prefetch = db->db_level == 0 && db->db_blkid != DMU_BONUS_BLKID &&
 	    (flags & DB_RF_NOPREFETCH) == 0 && dn != NULL &&
@@ -779,8 +781,10 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 		mutex_exit(&db->db_mtx);
 		if (prefetch)
 			dmu_zfetch(&dn->dn_zfetch, db->db_blkid, 1, B_TRUE);
+#if 0
 		if ((flags & DB_RF_HAVESTRUCT) == 0)
 			rw_exit(&dn->dn_struct_rwlock);
+#endif
 		DB_DNODE_EXIT(db);
 	} else if (db->db_state == DB_UNCACHED) {
 		spa_t *spa = dn->dn_objset->os_spa;
@@ -794,8 +798,10 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 		if (prefetch)
 			dmu_zfetch(&dn->dn_zfetch, db->db_blkid, 1, B_TRUE);
 
+#if 0
 		if ((flags & DB_RF_HAVESTRUCT) == 0)
 			rw_exit(&dn->dn_struct_rwlock);
+#endif
 		DB_DNODE_EXIT(db);
 
 		if (!havepzio)
@@ -812,8 +818,10 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 		mutex_exit(&db->db_mtx);
 		if (prefetch)
 			dmu_zfetch(&dn->dn_zfetch, db->db_blkid, 1, B_TRUE);
+#if 0
 		if ((flags & DB_RF_HAVESTRUCT) == 0)
 			rw_exit(&dn->dn_struct_rwlock);
+#endif
 		DB_DNODE_EXIT(db);
 
 		/* Skip the wait per the caller's request. */
@@ -1877,7 +1885,7 @@ dbuf_findbp(dnode_t *dn, int level, uint64_t blkid, int fail_sparse,
 	epbs = dn->dn_indblkshift - SPA_BLKPTRSHIFT;
 
 	ASSERT3U(level * epbs, <, 64);
-	ASSERT(RW_LOCK_HELD(&dn->dn_struct_rwlock));
+	/*ASSERT(RW_LOCK_HELD(&dn->dn_struct_rwlock));*/
 	if (level >= nlevels ||
 	    (blkid > (dn->dn_phys->dn_maxblkid >> (level * epbs)))) {
 		/* the buffer has no parent yet */
@@ -1919,7 +1927,7 @@ dbuf_create(dnode_t *dn, uint8_t level, uint64_t blkid,
 	objset_t *os = dn->dn_objset;
 	dmu_buf_impl_t *db, *odb;
 
-	ASSERT(RW_LOCK_HELD(&dn->dn_struct_rwlock));
+	/*ASSERT(RW_LOCK_HELD(&dn->dn_struct_rwlock));*/
 	ASSERT(dn->dn_type != DMU_OT_NONE);
 
 	db = kmem_cache_alloc(dbuf_cache, KM_SLEEP);
@@ -2273,7 +2281,7 @@ dbuf_hold_impl(dnode_t *dn, uint8_t level, uint64_t blkid,
 	dmu_buf_impl_t *db, *parent = NULL;
 
 	ASSERT(blkid != DMU_BONUS_BLKID);
-	ASSERT(RW_LOCK_HELD(&dn->dn_struct_rwlock));
+	/*ASSERT(RW_LOCK_HELD(&dn->dn_struct_rwlock));*/
 	ASSERT3U(dn->dn_nlevels, >, level);
 
 	*dbp = NULL;

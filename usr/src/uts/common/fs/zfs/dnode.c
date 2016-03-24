@@ -1270,10 +1270,12 @@ dnode_hold_impl(objset_t *os, uint64_t object, int flag,
 
 	DNODE_VERIFY(mdn);
 
+#if 0
 	if (!RW_WRITE_HELD(&mdn->dn_struct_rwlock)) {
 		rw_enter(&mdn->dn_struct_rwlock, RW_READER);
 		drop_struct_lock = TRUE;
 	}
+#endif
 
 	blk = dbuf_whichblock(mdn, 0, object * sizeof (dnode_phys_t));
 
