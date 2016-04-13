@@ -1389,11 +1389,11 @@ dmu_objset_userquota_get_ids(dnode_t *dn, boolean_t before, dmu_tx_t *tx)
 	int error;
 	boolean_t have_spill = B_FALSE;
 
-	if (!dmu_objset_userused_enabled(dn->dn_objset))
-		return;
-
 	if (before && (flags & (DN_ID_CHKED_BONUS|DN_ID_OLD_EXIST|
 	    DN_ID_CHKED_SPILL)))
+		return;
+
+	if (!dmu_objset_userused_enabled(dn->dn_objset))
 		return;
 
 	if (before && dn->dn_bonuslen != 0)

@@ -1449,6 +1449,9 @@ dnode_setdirty(dnode_t *dn, dmu_tx_t *tx)
 	mutex_exit(&dn->dn_mtx);
 #endif
 
+	if (list_link_active(&dn->dn_dirty_link[txg & TXG_MASK]))
+		return;
+
 	/*
 	 * Determine old uid/gid when necessary
 	 */
