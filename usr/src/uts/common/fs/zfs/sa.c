@@ -466,10 +466,12 @@ sa_find_layout(objset_t *os, uint64_t hash, sa_attr_type_t *attrs,
 	avl_index_t loc;
 	sa_os_t *sa = os->os_sa;
 	boolean_t found = B_FALSE;
+	boolean_t locked = B_FALSE;
 
-	mutex_enter(&sa->sa_lock);
+again:
 	tbsearch.lot_hash = hash;
 	tbsearch.lot_instance = 0;
+	/* XXX could be concurrently modifying avl tree */
 	tb = avl_find(&sa->sa_layout_hash_tree, &tbsearch, &loc);
 	if (tb) {
 		for (; tb && tb->lot_hash == hash;
@@ -481,10 +483,17 @@ sa_find_layout(objset_t *os, uint64_t hash, sa_attr_type_t *attrs,
 		}
 	}
 	if (!found) {
+		if (!locked) {
+			mutex_enter(&sa->sa_lock);
+			locked = B_TRUE;
+			goto again;
+		}
+
 		tb = sa_add_layout_entry(os, attrs, count,
 		    avl_numnodes(&sa->sa_layout_num_tree), hash, B_TRUE, tx);
 	}
-	mutex_exit(&sa->sa_lock);
+	if (locked)
+		mutex_exit(&sa->sa_lock);
 	*lot = tb;
 }
 
@@ -1267,12 +1276,12 @@ sa_build_index(sa_handle_t *hdl, sa_buf_type_t buftype)
 	sa_hdr_phys_t *sa_hdr_phys;
 	dmu_buf_impl_t *db = SA_GET_DB(hdl, buftype);
 	dmu_object_type_t bonustype = SA_BONUSTYPE_FROM_DB(db);
-	sa_os_t *sa = hdl->sa_os->os_sa;
+	/*sa_os_t *sa = hdl->sa_os->os_sa;*/
 	sa_idx_tab_t *idx_tab;
 
 	sa_hdr_phys = SA_GET_HDR(hdl, buftype);
 
-	mutex_enter(&sa->sa_lock);
+	/*mutex_enter(&sa->sa_lock);*/
 
 	/* Do we need to byteswap? */
 
@@ -1290,7 +1299,7 @@ sa_build_index(sa_handle_t *hdl, sa_buf_type_t buftype)
 	else
 		hdl->sa_spill_tab = idx_tab;
 
-	mutex_exit(&sa->sa_lock);
+	/*mutex_exit(&sa->sa_lock);*/
 	return (0);
 }
 
@@ -1310,8 +1319,8 @@ sa_idx_tab_rele(objset_t *os, void *arg)
 	if (idx_tab == NULL)
 		return;
 
-	mutex_enter(&sa->sa_lock);
 	if (refcount_remove(&idx_tab->sa_refcount, NULL) == 0) {
+		mutex_enter(&sa->sa_lock);
 		list_remove(&idx_tab->sa_layout->lot_idx_tab, idx_tab);
 		if (idx_tab->sa_variable_lengths)
 			kmem_free(idx_tab->sa_variable_lengths,
@@ -1321,8 +1330,8 @@ sa_idx_tab_rele(objset_t *os, void *arg)
 		kmem_free(idx_tab->sa_idx_tab,
 		    sizeof (uint32_t) * sa->sa_num_attrs);
 		kmem_free(idx_tab, sizeof (sa_idx_tab_t));
+		mutex_exit(&sa->sa_lock);
 	}
-	mutex_exit(&sa->sa_lock);
 }
 
 static void
