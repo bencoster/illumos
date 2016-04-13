@@ -789,7 +789,8 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 	} else if (db->db_state == DB_UNCACHED) {
 		spa_t *spa = dn->dn_objset->os_spa;
 
-		if (zio == NULL)
+		if (zio == NULL &&
+		    db->db_blkptr != NULL && !BP_IS_HOLE(db->db_blkptr))
 			zio = zio_root(spa, NULL, NULL, ZIO_FLAG_CANFAIL);
 		dbuf_read_impl(db, zio, flags);
 
@@ -804,7 +805,7 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 #endif
 		DB_DNODE_EXIT(db);
 
-		if (!havepzio)
+		if (!havepzio && zio != NULL)
 			err = zio_wait(zio);
 	} else {
 		/*
