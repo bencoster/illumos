@@ -556,8 +556,8 @@ dsl_pool_sync(dsl_pool_t *dp, uint64_t txg)
 		dp->dp_mos_uncompressed_delta = 0;
 	}
 
-	if (list_head(&mos->os_dirty_dnodes[txg & TXG_MASK]) != NULL ||
-	    list_head(&mos->os_free_dnodes[txg & TXG_MASK]) != NULL) {
+	if (!multilist_is_empty(&mos->os_dirty_dnodes[txg & TXG_MASK]) ||
+	    !multilist_is_empty(&mos->os_free_dnodes[txg & TXG_MASK])) {
 		dsl_pool_sync_mos(dp, tx);
 	}
 
@@ -608,7 +608,9 @@ int
 dsl_pool_sync_context(dsl_pool_t *dp)
 {
 	return (curthread == dp->dp_tx.tx_sync_thread ||
-	    spa_is_initializing(dp->dp_spa));
+	    spa_is_initializing(dp->dp_spa) ||
+	    /* XXX for MT dnode_sync */
+	    taskq_member(system_taskq, curthread));
 }
 
 uint64_t

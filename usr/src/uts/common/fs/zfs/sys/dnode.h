@@ -35,6 +35,7 @@
 #include <sys/refcount.h>
 #include <sys/dmu_zfetch.h>
 #include <sys/zrlock.h>
+#include <sys/multilist.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -200,7 +201,7 @@ struct dnode {
 	uint64_t dn_unlisted_l0_blkid;
 
 	/* protected by os_lock: */
-	list_node_t dn_dirty_link[TXG_SIZE];	/* next on dataset's dirty */
+	multilist_node_t dn_dirty_link[TXG_SIZE]; /* next on dataset's dirty */
 
 	/* protected by dn_mtx: */
 	kmutex_t dn_mtx;
@@ -282,6 +283,7 @@ void dnode_setbonus_type(dnode_t *dn, dmu_object_type_t, dmu_tx_t *tx);
 void dnode_rm_spill(dnode_t *dn, dmu_tx_t *tx);
 
 void dnode_hash_remove(dnode_t *dn);
+uint64_t dnode_hash(void *os, uint64_t obj);
 int dnode_hold(struct objset *dd, uint64_t object,
     void *ref, dnode_t **dnp);
 int dnode_hold_impl(struct objset *dd, uint64_t object, int flag,

@@ -73,7 +73,7 @@ static dnode_hash_table_t dnode_hash_table;
 
 static kmem_cbrc_t dnode_move(void *, void *, size_t, void *);
 
-static uint64_t
+uint64_t
 dnode_hash(void *os, uint64_t obj)
 {
 	uintptr_t osv = (uintptr_t)os;
@@ -1478,9 +1478,9 @@ dnode_setdirty(dnode_t *dn, dmu_tx_t *tx)
 	    dn->dn_object, txg);
 
 	if (dn->dn_free_txg > 0 && dn->dn_free_txg <= txg) {
-		list_insert_tail(&os->os_free_dnodes[txg&TXG_MASK], dn);
+		multilist_insert(&os->os_free_dnodes[txg&TXG_MASK], dn);
 	} else {
-		list_insert_tail(&os->os_dirty_dnodes[txg&TXG_MASK], dn);
+		multilist_insert(&os->os_dirty_dnodes[txg&TXG_MASK], dn);
 	}
 
 	mutex_exit(&os->os_lock);
@@ -1525,8 +1525,8 @@ dnode_free(dnode_t *dn, dmu_tx_t *tx)
 	 */
 	mutex_enter(&dn->dn_objset->os_lock);
 	if (list_link_active(&dn->dn_dirty_link[txgoff])) {
-		list_remove(&dn->dn_objset->os_dirty_dnodes[txgoff], dn);
-		list_insert_tail(&dn->dn_objset->os_free_dnodes[txgoff], dn);
+		multilist_remove(&dn->dn_objset->os_dirty_dnodes[txgoff], dn);
+		multilist_insert(&dn->dn_objset->os_free_dnodes[txgoff], dn);
 		mutex_exit(&dn->dn_objset->os_lock);
 	} else {
 		mutex_exit(&dn->dn_objset->os_lock);
