@@ -749,11 +749,13 @@ dmu_tx_hold_zap(dmu_tx_t *tx, uint64_t object, int add, const char *name)
 		 * If there is only one block  (i.e. this is a micro-zap)
 		 * and we are not adding anything, the accounting is simple.
 		 */
+#if 0
 		err = dmu_tx_check_ioerr(NULL, dn, 0, 0);
 		if (err) {
 			tx->tx_err = err;
 			return;
 		}
+#endif
 
 		/*
 		 * Use max block size here, since we don't know how much
