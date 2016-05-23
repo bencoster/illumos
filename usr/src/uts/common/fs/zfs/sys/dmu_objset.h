@@ -111,6 +111,7 @@ struct objset {
 	/* Protected by os_obj_lock */
 	kmutex_t os_obj_lock;
 	uint64_t os_obj_next;
+	uint64_t *os_obj_next_array;
 
 	/* Protected by os_lock */
 	kmutex_t os_lock;

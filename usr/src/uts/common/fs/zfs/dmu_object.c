@@ -33,6 +33,8 @@
 
 int object_alloc_rescan_levels = 1;
 
+extern int zfs_arc_num_sublists_per_state;
+
 uint64_t
 dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
@@ -43,33 +45,49 @@ dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
 	    (DMU_META_DNODE(os)->dn_indblkshift - SPA_BLKPTRSHIFT));
 	dnode_t *dn = NULL;
 	int restarted = B_FALSE;
+	uint64_t *cpuobj = &os->os_obj_next_array[CPU_SEQID %
+	    zfs_arc_num_sublists_per_state];
 
-	mutex_enter(&os->os_obj_lock);
+	object = atomic_inc_64_nv(cpuobj);
 	for (;;) {
-		object = os->os_obj_next;
 		/*
-		 * Each time we polish off an L2 bp worth of dnodes
-		 * (2^13 objects), move to another L2 bp that's still
-		 * reasonably sparse (at most 1/4 full).  Look from the
-		 * beginning once, but after that keep looking from here.
-		 * If we can't find one, just keep going from here.
-		 *
-		 * Note that dmu_traverse depends on the behavior that we use
-		 * multiple blocks of the dnode object before going back to
-		 * reuse objects.  Any change to this algorithm should preserve
-		 * that property or find another solution to the issues
-		 * described in traverse_visitbp.
+		 * If we finished a block of dnodes, get a new one from
+		 * the global allocator.
 		 */
-		if (P2PHASE(object, L2_dnode_count) == 0) {
-			uint64_t offset = restarted ? object << DNODE_SHIFT : 0;
-			int error = dnode_next_offset(DMU_META_DNODE(os),
-			    DNODE_FIND_HOLE,
-			    &offset, 2, DNODES_PER_BLOCK >> 2, 0);
-			restarted = B_TRUE;
-			if (error == 0)
-				object = offset >> DNODE_SHIFT;
+		if (P2PHASE(object, DNODES_PER_BLOCK) == 0) {
+			mutex_enter(&os->os_obj_lock);
+			ASSERT0(P2PHASE(os->os_obj_next, DNODES_PER_BLOCK));
+			object = os->os_obj_next;
+			os->os_obj_next += DNODES_PER_BLOCK;
+			(void) atomic_swap_64(cpuobj, object);
+
+			/*
+			 * Each time we polish off an L2 bp worth of dnodes
+			 * (2^13 objects), move to another L2 bp that's still
+			 * reasonably sparse (at most 1/4 full).  Look from the
+			 * beginning once, but after that keep looking from here.
+			 * If we can't find one, just keep going from here.
+			 *
+			 * Note that dmu_traverse depends on the behavior that we use
+			 * multiple blocks of the dnode object before going back to
+			 * reuse objects.  Any change to this algorithm should preserve
+			 * that property or find another solution to the issues
+			 * described in traverse_visitbp.
+			 */
+			if (P2PHASE(object, L2_dnode_count) == 0) {
+				uint64_t offset = restarted ? object << DNODE_SHIFT : 0;
+				int error = dnode_next_offset(DMU_META_DNODE(os),
+				    DNODE_FIND_HOLE,
+				    &offset, 2, DNODES_PER_BLOCK >> 2, 0);
+				restarted = B_TRUE;
+				if (error == 0) {
+					object = offset >> DNODE_SHIFT;
+					os->os_obj_next =
+					    object + DNODES_PER_BLOCK;
+				}
+			}
+			mutex_exit(&os->os_obj_lock);
 		}
-		os->os_obj_next = ++object;
 
 		/*
 		 * XXX We should check for an i/o error here and return
@@ -79,20 +97,28 @@ dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
 		 */
 		(void) dnode_hold_impl(os, object, DNODE_MUST_BE_FREE,
 		    FTAG, &dn);
-		if (dn)
-			break;
+		if (dn != NULL) {
+			rw_enter(&dn->dn_struct_rwlock, RW_WRITER);
+			/*
+			 * Another thread could have allocated it; check
+			 * again now that we have the struct lock.
+			 */
+			if (dn->dn_type == DMU_OT_NONE) {
+				dnode_allocate(dn, ot, blocksize, 0,
+				    bonustype, bonuslen, tx);
+				rw_exit(&dn->dn_struct_rwlock);
+				dnode_rele(dn, FTAG);
+
+				dmu_tx_add_new_object(tx, os, object);
+				return (object);
+			}
+			rw_exit(&dn->dn_struct_rwlock);
+			dnode_rele(dn, FTAG);
+		}
 
 		if (dmu_object_next(os, &object, B_TRUE, 0) == 0)
-			os->os_obj_next = object - 1;
+			(void) atomic_swap_64(cpuobj, object);
 	}
-
-	dnode_allocate(dn, ot, blocksize, 0, bonustype, bonuslen, tx);
-	dnode_rele(dn, FTAG);
-
-	mutex_exit(&os->os_obj_lock);
-
-	dmu_tx_add_new_object(tx, os, object);
-	return (object);
 }
 
 int
