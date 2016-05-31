@@ -43,6 +43,7 @@
 #include <sys/zfeature.h>
 #include <sys/vdev_indirect_births.h>
 #include <sys/vdev_indirect_mapping.h>
+#include <sys/vdev_initialize.h>
 
 /*
  * This file contains the necessary logic to remove vdevs from a
@@ -706,7 +707,7 @@ spa_vdev_copy_segment_write_done(zio_t *zio)
 {
 	vdev_copy_seg_arg_t *vcsa = zio->io_private;
 	vdev_copy_arg_t *vca = vcsa->vcsa_copy_arg;
-	spa_config_exit(zio->io_spa, SCL_STATE, FTAG);
+	spa_config_exit(zio->io_spa, SCL_STATE, zio->io_spa);
 	zio_data_buf_free(zio->io_data, zio->io_size);
 
 	mutex_enter(&vca->vca_lock);
@@ -780,7 +781,7 @@ spa_vdev_copy_segment(vdev_t *vd, uint64_t start, uint64_t size, uint64_t txg,
 	 * This lock is eventually released by the donefunc for the
 	 * zio_write_phys that finishes copying the data.
 	 */
-	spa_config_enter(spa, SCL_STATE, FTAG, RW_READER);
+	spa_config_enter(spa, SCL_STATE, spa, RW_READER);
 
 	zio_nowait(zio_read_phys(spa->spa_txg_zio[txg & TXG_MASK],
 	    vd, start + VDEV_LABEL_START_SIZE,
@@ -907,6 +908,7 @@ vdev_remove_complete(vdev_t *vd)
 {
 	spa_t *spa = vd->vdev_spa;
 	uint64_t txg;
+	ASSERT3P(vd->vdev_initialize_thread, ==, NULL);
 
 	/*
 	 * Wait for any deferred frees to be synced before we call
@@ -1498,6 +1500,9 @@ spa_vdev_remove_log(vdev_t *vd, uint64_t *txg)
 	vdev_config_dirty(vd);
 	spa_vdev_config_exit(spa, NULL, *txg, 0, FTAG);
 
+	/* Stop initializing */
+	(void) vdev_initialize_stop_all(vd, VDEV_INITIALIZE_CANCELED);
+
 	*txg = spa_vdev_config_enter(spa);
 
 	ASSERT(MUTEX_HELD(&spa_namespace_lock));
@@ -1654,6 +1659,13 @@ spa_vdev_remove_top(vdev_t *vd, uint64_t *txg)
 	 */
 	error = spa_reset_logs(spa);
 
+	/*
+	 * We stop any initializing that is currently in progress but leave
+	 * the state as "active". This will allow the initializing to resume
+	 * if the removal is canceled sometime later.
+	 */
+	vdev_initialize_stop_all(vd, VDEV_INITIALIZE_ACTIVE);
+
 	*txg = spa_vdev_config_enter(spa);
 
 	/*
@@ -1665,6 +1677,7 @@ spa_vdev_remove_top(vdev_t *vd, uint64_t *txg)
 
 	if (error != 0) {
 		metaslab_group_activate(mg);
+		spa_async_request(spa, SPA_ASYNC_INITIALIZE_RESTART);
 		return (error);
 	}
 
