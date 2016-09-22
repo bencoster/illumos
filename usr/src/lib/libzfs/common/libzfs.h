@@ -251,6 +251,7 @@ extern int zpool_vdev_attach(zpool_handle_t *, const char *,
     const char *, nvlist_t *, int);
 extern int zpool_vdev_detach(zpool_handle_t *, const char *);
 extern int zpool_vdev_remove(zpool_handle_t *, const char *);
+extern int zpool_vdev_remove_cancel(zpool_handle_t *);
 extern int zpool_vdev_split(zpool_handle_t *, char *, nvlist_t **, nvlist_t *,
     splitflags_t);
 
@@ -779,6 +780,7 @@ extern boolean_t libzfs_fru_notself(libzfs_handle_t *, const char *);
 extern int zpool_fru_set(zpool_handle_t *, uint64_t, const char *);
 
 extern int zfs_get_hole_count(const char *, uint64_t *, uint64_t *);
+extern int zfs_remap_indirects(libzfs_handle_t *hdl, const char *);
 
 #ifdef	__cplusplus
 }
