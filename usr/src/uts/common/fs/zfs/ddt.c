@@ -43,7 +43,14 @@
  */
 int zfs_dedup_prefetch = 1;
 
+/*
+ * Maximum number of unique (refcount==1) entries allowed in the DDT.
+ * If more entries are added, old (randomly selected) entries will be evicted.
+ */
+int64_t ddt_unique_max = 50;
+
 static const ddt_ops_t *ddt_ops[DDT_TYPES] = {
+	&ddt_log_ops,
 	&ddt_zap_ops,
 };
 
@@ -203,6 +210,9 @@ ddt_object_walk(ddt_t *ddt, enum ddt_type type, enum ddt_class class,
     uint64_t *walk, ddt_entry_t *dde)
 {
 	ASSERT(ddt_object_exists(ddt, type, class));
+
+	dde->dde_type = type;
+	dde->dde_class = class;
 
 	return (ddt_ops[type]->ddt_op_walk(ddt->ddt_os,
 	    ddt->ddt_object[type][class], dde, walk));
@@ -395,7 +405,7 @@ ddt_stat_add(ddt_stat_t *dst, const ddt_stat_t *src, uint64_t neg)
 		*d++ += (*s++ ^ neg) - neg;
 }
 
-static void
+void
 ddt_stat_update(ddt_t *ddt, ddt_entry_t *dde, uint64_t neg)
 {
 	ddt_stat_t dds;
@@ -1027,9 +1037,33 @@ ddt_sync_entry(ddt_t *ddt, ddt_entry_t *dde, dmu_tx_t *tx, uint64_t txg)
 
 	if (otype != DDT_TYPES &&
 	    (otype != ntype || oclass != nclass || total_refcnt == 0)) {
+		/*
+		 * Note: if we could evict entries from the (UNIQUE) DDT
+		 * while there are outstanding changes (ddt_entry_t's in
+		 * ddt_tree), this remove could fail because it could have
+		 * been evicted.
+		 */
 		VERIFY(ddt_object_remove(ddt, otype, oclass, dde, tx) == 0);
 		ASSERT(ddt_object_lookup(ddt, otype, oclass, dde) == ENOENT);
 	}
+	printf("ddt_sync_entry(txg=%llu): writing oclass=%u nclass=%u: ",
+	    (long long)txg,
+	    oclass, nclass);
+	for (int p = 0; p < DDT_PHYS_TYPES; p++) {
+		if (dde->dde_phys[p].ddp_phys_birth == 0)
+			continue;
+		printf("phys_type=%u rc=%llu phys_birth=%llu vd0=%llu off0=0x%llx vd1=%llu off1=0x%llx vd2=%llu off2=0x%llx; \n",
+		    p,
+		    (long long)dde->dde_phys[p].ddp_refcnt,
+		    (long long)dde->dde_phys[p].ddp_phys_birth,
+		    (long long)DVA_GET_VDEV(&dde->dde_phys[p].ddp_dva[0]),
+		    (long long)DVA_GET_OFFSET(&dde->dde_phys[p].ddp_dva[0]),
+		    (long long)DVA_GET_VDEV(&dde->dde_phys[p].ddp_dva[1]),
+		    (long long)DVA_GET_OFFSET(&dde->dde_phys[p].ddp_dva[1]),
+		    (long long)DVA_GET_VDEV(&dde->dde_phys[p].ddp_dva[2]),
+		    (long long)DVA_GET_OFFSET(&dde->dde_phys[p].ddp_dva[2]));
+	}
+	printf("\n");
 
 	if (total_refcnt != 0) {
 		dde->dde_type = ntype;
@@ -1074,6 +1108,55 @@ ddt_sync_table(ddt_t *ddt, dmu_tx_t *tx, uint64_t txg)
 	while ((dde = avl_destroy_nodes(&ddt->ddt_tree, &cookie)) != NULL) {
 		ddt_sync_entry(ddt, dde, tx, txg);
 		ddt_free(dde);
+	}
+
+	/*
+	 * If the dedup table is too big, evict entries.
+	 *
+	 * XXX do this based on total DDT size?  Probably need controls
+	 * like try to not let the total DDT size be more than X MB,
+	 * but let UNIQUE use at least Y MB.
+	 */
+	if (ddt_object_exists(ddt, DDT_TYPE_CURRENT, DDT_CLASS_UNIQUE)) {
+		uint64_t count = ddt_object_count(ddt, DDT_TYPE_CURRENT,
+		    DDT_CLASS_UNIQUE);
+		for (int64_t i = 0; i < (int64_t)(count - ddt_unique_max); i++) {
+			ddt_entry_t rmdde = { 0 };
+			uint64_t walk = spa_get_random(UINT64_MAX);
+			if (ddt_object_walk(ddt,
+			    DDT_TYPE_CURRENT, DDT_CLASS_UNIQUE,
+			    &walk, &rmdde) == 0) {
+				enum ddt_phys_type t;
+				for (t = 0; t < DDT_PHYS_TYPES; t++) {
+					if (rmdde.dde_phys[t].ddp_refcnt != 0)
+						break;
+				}
+				printf("ddt_sync_table(txg=%llu): evicting %p type=%u vd0=%llu off0=0x%llx vd1=%llu off1=0x%llx vd2=%llu off2=0x%llx\n",
+				    (long long)txg,
+				    &rmdde,
+				    t,
+				    (long long)DVA_GET_VDEV(&rmdde.dde_phys[t].ddp_dva[0]),
+				    (long long)DVA_GET_OFFSET(&rmdde.dde_phys[t].ddp_dva[0]),
+				    (long long)DVA_GET_VDEV(&rmdde.dde_phys[t].ddp_dva[1]),
+				    (long long)DVA_GET_OFFSET(&rmdde.dde_phys[t].ddp_dva[1]),
+				    (long long)DVA_GET_VDEV(&rmdde.dde_phys[t].ddp_dva[2]),
+				    (long long)DVA_GET_OFFSET(&rmdde.dde_phys[t].ddp_dva[2]));
+				ASSERT3U(ddt_phys_total_refcnt(&rmdde), ==, 1);
+				ASSERT3U(t, >, DDT_PHYS_DITTO);
+				ASSERT(rmdde.dde_phys[t].ddp_phys_birth != 0);
+				ASSERT3U(rmdde.dde_phys[t].ddp_refcnt, ==, 1);
+				for (enum ddt_phys_type u = 0; u < DDT_PHYS_TYPES; u++) {
+					if (u != t) {
+						ASSERT0(rmdde.dde_phys[u].ddp_phys_birth);
+						ASSERT0(rmdde.dde_phys[u].ddp_refcnt);
+					}
+				}
+				ddt_stat_update(ddt, &rmdde, -1);
+				VERIFY0(ddt_object_remove(ddt,
+				    DDT_TYPE_CURRENT, DDT_CLASS_UNIQUE,
+				    &rmdde, tx));
+			}
+		}
 	}
 
 	for (enum ddt_type type = 0; type < DDT_TYPES; type++) {
@@ -1132,8 +1215,6 @@ ddt_walk(spa_t *spa, ddt_bookmark_t *ddb, ddt_entry_t *dde)
 					    ddb->ddb_type, ddb->ddb_class,
 					    &ddb->ddb_cursor, dde);
 				}
-				dde->dde_type = ddb->ddb_type;
-				dde->dde_class = ddb->ddb_class;
 				if (error == 0)
 					return (0);
 				if (error != ENOENT)

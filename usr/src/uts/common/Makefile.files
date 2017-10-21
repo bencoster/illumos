@@ -1386,6 +1386,7 @@ ZFS_COMMON_OBJS +=		\
 	dbuf.o			\
 	ddt.o			\
 	ddt_zap.o		\
+	ddt_log.o		\
 	dmu.o			\
 	dmu_diff.o		\
 	dmu_send.o		\
