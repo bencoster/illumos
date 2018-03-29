@@ -5498,7 +5498,8 @@ ztest_run_zdb(char *pool)
 	isa = strdup(isa);
 	/* LINTED */
 	(void) sprintf(bin,
-	    "/usr/sbin%.*s/zdb -bcc%s%s -G -d -U %s %s",
+	    "/usr/sbin%.*s/zdb -bcc%s%s -G -d -U %s "
+	    "-o zfs_reconstruct_indirect_combinations_max=1000000 %s",
 	    isalen,
 	    isa,
 	    ztest_opts.zo_verbose >= 3 ? "s" : "",
